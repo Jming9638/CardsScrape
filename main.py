@@ -1,81 +1,52 @@
 import time
 import pandas as pd
-from datetime import datetime
-from fake_useragent import UserAgent
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
-print(f"Running time: {datetime.now()}")
+model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-large")
+tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-large")
 
-ua = UserAgent()
-options = Options()
-options.add_argument(f'user-agent={ua.random}')
-options.add_experimental_option("prefs", {"profile.managed_default_content_settings.images": 2})
+questions = [
+    ["cashback", "what are the cashback offers?"],
+    ["discounts", "list out all the discounts from the statement"],
+    ["reward_point", "what are the reward point offers?"],
+    ["shopping", "what are the shopping benefits?"],
+    ["dining", "what are the dining/food offers?"],
+    ["golf_benefits", "what are the golf benefits?"],
+    ["travel_benefits", "what are the travel benefits?"]
+]
 
-service = Service(ChromeDriverManager().install())
-driver = webdriver.Chrome(service=service, options=options)
 
-url = 'https://yallacompare.com/uae/en/%D8%A8%D8%B7%D8%A7%D9%82%D8%A7%D8%AA-%D8%A7%D9%84%D8%A7%D8%A6%D8%AA%D9%85%D8%A7%D9%86/'
-driver.get(url)
+def main():
+    data = pd.read_csv('./results.csv')
+    details = data['details'].to_list()
+    
+    total_run = len(details) * len(questions)
+    print(f"Total run: {total_run}")
+    
+    start_time = time.time()
+    run = 0
+    for new_col, ques in questions:
+        answers = []
+        for detail in details:
+            run += 1
+            prompt = f"""{detail}\n\nAnswer this question based on the article: {ques}\nlist down the answer according to the article."""
+            inputs = tokenizer(prompt, return_tensors="pt")
+            outputs = model.generate(**inputs, max_new_tokens=64)
+            answer = ", ".join(tokenizer.batch_decode(outputs, skip_special_tokens=True))
+            answers.append(answer)
+            
+            print(f"Progress: {run}/{total_run}......")
+            time.sleep(0.2)
+            
+        data[new_col] = answers
+        print(f"Category: {new_col} done.")
+        print()
 
-time.sleep(5)
-last_height = driver.execute_script("return document.body.scrollHeight")
-while True:
-    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-    time.sleep(3)  # Loading time
-    new_height = driver.execute_script("return document.body.scrollHeight")
-    if new_height == last_height:
-        break  # Stop scrolling when reach the end of the page
-    last_height = new_height
+    data.to_csv("./featured_results.csv", index=False)
+    end_time = time.time()
+    time_used = round((end_time - start_time) / 60, 2)
+    print(f"Success, done. Time used: {time_used} min")
 
-driver.execute_script("window.scrollTo(0, 0);")
-product_titles = driver.find_elements(By.XPATH, '//div[@class="srpProduct-title"]')
-see_more_buttons = driver.find_elements(By.XPATH, '//*[@class="more"]')
-click_success = []
-for title, see_more in zip(product_titles, see_more_buttons):
-    try:
-        see_more.click()
-        click_success.append([title.text, 1])
-        time.sleep(1)
-    except Exception as error:
-        click_success.append([title.text, 0])
-        pass
 
-time.sleep(15)
-
-min_salaries = driver.find_elements(By.XPATH, '//*[@data-field="minimumSalary"]')
-annual_fees = driver.find_elements(By.XPATH, '//*[@data-field="annualFee"]')
-rates = driver.find_elements(By.XPATH, '//*[@data-field="flatRate"]')
-salary_transfers = driver.find_elements(By.XPATH, '//*[@data-field="hasNoSalaryTransfer"]')
-features = driver.find_elements(By.XPATH, '//*[@data-field="features"]')
-details = driver.find_elements(By.XPATH, '//*[@class="col-sm-12 srpTable__viewMoreDetails_section"]')  # dynamics
-
-# print(len(product_titles))
-# print(len(min_salaries))
-# print(len(annual_fees))
-# print(len(rates))
-# print(len(salary_transfers))
-# print(len(features))
-# print(len(details))
-
-results = []
-for i in range(len(product_titles)):
-    results.append([
-        product_titles[i].text,
-        min_salaries[i].text,
-        annual_fees[i].text,
-        rates[i].text,
-        salary_transfers[i].text,
-        features[i].text,
-        details[i].text
-    ])
-
-data = pd.DataFrame(data=results, columns=['product_titles', 'min_salaries', 'annual_fees', 'rates', 'salary_transfers', 'features', 'details'])
-data.to_csv('./results.csv', index=False)
-
-time.sleep(5)
-driver.quit()
+if __name__ == "__main__":
+    main()
